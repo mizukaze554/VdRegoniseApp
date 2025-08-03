@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <title>Real‑Time Object Detection (Front/Back Switch)</title>
+  <title>Real‑Time Object Detection (Responsive)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -18,7 +18,12 @@
       object-fit: cover;
     }
     #fab {
-      position: absolute; bottom: 20px; right: 20px;
+      position: absolute;
+      bottom: 5%;
+      right: 5%;
+      width: clamp(60px, 15vw, 90px);
+      height: clamp(60px, 15vw, 90px);
+      font-size: clamp(20px, 6vw, 32px);
     }
   </style>
 </head>
@@ -27,7 +32,8 @@
   <canvas id="overlay"></canvas>
   
   <!-- Floating Action Button -->
-  <button id="fab" class="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-4 shadow-lg">
+  <button id="fab" 
+    class="bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center">
     🎯
   </button>
 
@@ -43,7 +49,7 @@
     let longPressTimer = null;
     let lastTime = 0;
 
-    // 📷 Start camera with given facingMode
+    // 📷 Start camera
     async function startCamera() {
       stopCamera();
       try {
@@ -82,19 +88,19 @@
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, w, h);
         ctx.fillStyle = '#0FAD4E';
-        ctx.font = '16px sans-serif';
+        ctx.font = `${Math.max(14, overlay.width * 0.02)|0}px sans-serif`;
         ctx.fillText(`${p.class} ${(p.score*100)|0}%`, x, y > 20 ? y - 5 : y + 18);
       });
     }
 
-    // 🔄 Continuous detection loop
+    // 🔄 Continuous detection
     async function detectLoop(time) {
       if (!detecting || !model || !cameraActive) return;
       await detectFrame();
       const fps = (1000 / (time - lastTime))|0;
       lastTime = time;
       ctx.fillStyle = '#fff';
-      ctx.font = '14px monospace';
+      ctx.font = `${Math.max(12, overlay.width * 0.015)|0}px monospace`;
       ctx.fillText(`${fps} fps`, 10, 20);
       requestAnimationFrame(detectLoop);
     }
@@ -113,17 +119,14 @@
       setTimeout(() => tapCount = 0, 400);
 
       if (tapCount === 1 && now - lastTap > 300) {
-        // Single tap = detect one frame
-        detectFrame();
+        detectFrame(); // Single tap
       } 
       if (tapCount === 2) {
-        // Double tap = toggle detection
-        detecting = !detecting;
+        detecting = !detecting; // Double tap
         if (detecting) requestAnimationFrame(detectLoop);
       }
       if (tapCount === 3) {
-        // Triple tap = switch camera
-        switchCamera();
+        switchCamera(); // Triple tap
         tapCount = 0;
       }
       lastTap = now;
