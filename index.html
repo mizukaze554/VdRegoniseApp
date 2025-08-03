@@ -1,74 +1,85 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <title>Free Real-Time Object Detection</title>
+  <meta charset="UTF-8" />
+  <title>Real‑Time Object Detection</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 </head>
-<body class="bg-gray-100 p-4">
-  <div class="max-w-md mx-auto bg-white p-4 rounded shadow">
-    <h1 class="text-2xl font-bold mb-4">Free Object Detection (Back Camera)</h1>
-    <video id="video" autoplay playsinline class="w-full rounded border"></video>
-    <canvas id="canvas" class="hidden"></canvas>
-    <div class="mt-4 flex space-x-2">
-      <button id="snap" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 rounded">Detect Objects</button>
-      <button id="clear" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 rounded">Clear</button>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded shadow-lg p-6 w-full max-w-lg">
+    <h1 class="text-3xl font-bold mb-4 text-center">Object Detector</h1>
+    <div class="relative">
+      <video id="video" autoplay playsinline muted class="rounded w-full"></video>
+      <canvas id="overlay" class="absolute top-0 left-0 w-full h-full"></canvas>
     </div>
-    <div id="results" class="mt-4"></div>
+    <div class="mt-4 flex justify-between items-center">
+      <button id="toggle" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded">Start Detection</button>
+      <span id="fps" class="text-gray-600"></span>
+    </div>
   </div>
 
   <script>
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const snap = document.getElementById('snap');
-    const clear = document.getElementById('clear');
-    const resultsDiv = document.getElementById('results');
+    const overlay = document.getElementById('overlay');
+    const ctx = overlay.getContext('2d');
+    const btn = document.getElementById('toggle');
+    const fpsDisplay = document.getElementById('fps');
+    let model, detecting = false, lastTime = 0;
 
-    async function startCamera() {
-      try {
-        video.srcObject = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { exact: "environment" } },
-          audio: false
-        });
-      } catch (err) {
-        video.srcObject = await navigator.mediaDevices.getUserMedia({ video: true });
-      }
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: 'environment' } },
+        audio: false
+      }).catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+      video.srcObject = stream;
+      await new Promise(r => video.onloadedmetadata = r);
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
     }
 
-    async function detect() {
-      resultsDiv.innerHTML = '<p class="text-gray-600">Detecting…</p>';
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext('2d').drawImage(video, 0, 0);
-
-      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.8));
-
-      const form = new FormData();
-      form.append('image', blob, 'capture.jpg');
-
-      try {
-        const resp = await fetch('https://demo.api4ai.cloud/general-det/v1/results', {
-          method: 'POST',
-          body: form
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || resp.statusText);
-
-        const objects = data.results?.[0]?.entities || [];
-        resultsDiv.innerHTML = '';
-        objects.forEach(obj => {
-          const d = document.createElement('div');
-          d.innerHTML = `${obj.name} – ${(obj.confidence*100).toFixed(1)}%`;
-          resultsDiv.appendChild(d);
-        });
-      } catch (e) {
-        resultsDiv.innerHTML = `<p class="text-red-500">Error: ${e.message}</p>`;
-      }
+    async function loadModel() {
+      model = await cocoSsd.load();
     }
 
-    snap.onclick = detect;
-    clear.onclick = () => (resultsDiv.innerHTML = '');
-    startCamera();
+    async function detectFrame(time) {
+      if (!detecting) return;
+      const predictions = await model.detect(video);
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+      predictions.forEach(p => {
+        if (p.score < 0.5) return;
+        const [x, y, w, h] = p.bbox;
+        ctx.strokeStyle = '#0FAD4E';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = '#0FAD4E';
+        ctx.font = '18px sans-serif';
+        ctx.fillText(`${p.class} ${(p.score*100).toFixed(0)}%`, x, y > 20 ? y - 5 : y + 18);
+      });
+
+      const fps = 1000 / (time - lastTime);
+      lastTime = time;
+      fpsDisplay.textContent = `${fps.toFixed(1)} fps`;
+
+      requestAnimationFrame(detectFrame);
+    }
+
+    btn.onclick = () => {
+      detecting = !detecting;
+      btn.textContent = detecting ? 'Stop Detection' : 'Start Detection';
+      if (detecting) requestAnimationFrame(detectFrame);
+    }
+
+    async function init() {
+      await setupCamera();
+      await loadModel();
+      btn.disabled = false;
+    }
+
+    btn.disabled = true;
+    init();
   </script>
 </body>
 </html>
