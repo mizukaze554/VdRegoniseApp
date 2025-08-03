@@ -1,55 +1,131 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" >
 <head>
-  <meta charset="UTF-8"/>
-  <title>Real‑Time Object Detection (Responsive)</title>
+  <meta charset="UTF-8" />
+  <title>Optimized Object Detection with Modal</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
   <style>
     html, body {
       margin: 0; padding: 0;
-      height: 100%; overflow: hidden;
+      height: 100%;
       background: black;
+      user-select: none; /* disable text selection */
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      -o-user-select: none;
     }
-    #video, #overlay {
-      position: absolute; top: 0; left: 0;
-      width: 100%; height: 100%;
+    #container {
+      position: relative;
+      height: 70vh;
+      max-width: 100vw;
+      margin: 2vh auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #111;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    video, canvas {
+      height: 100%;
+      width: auto;
+      max-width: 100vw;
       object-fit: cover;
+      border-radius: 12px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+      user-select: none;
     }
     #fab {
-      position: absolute;
+      position: fixed;
       bottom: 5%;
       right: 5%;
-      width: clamp(60px, 15vw, 90px);
-      height: clamp(60px, 15vw, 90px);
-      font-size: clamp(20px, 6vw, 32px);
+      width: clamp(70px, 15vw, 100px);
+      height: clamp(70px, 15vw, 100px);
+      font-size: clamp(22px, 6vw, 36px);
+      z-index: 20;
+      user-select: none;
+    }
+    /* Modal backdrop */
+    .modal-backdrop {
+      background: rgba(0,0,0,0.6);
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      display: flex; justify-content: center; align-items: center;
+      z-index: 100;
+    }
+    /* Modal content */
+    .modal-content {
+      background: #222;
+      color: #eee;
+      padding: 1.5rem 2rem;
+      border-radius: 0.75rem;
+      max-width: 90vw;
+      text-align: center;
+      font-family: monospace, monospace;
+    }
+    .modal-content button {
+      margin-top: 1rem;
     }
   </style>
 </head>
 <body>
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="overlay"></canvas>
-  
-  <!-- Floating Action Button -->
+  <div id="container">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
   <button id="fab" 
-    class="bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center">
+    class="bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg flex items-center justify-center select-none">
     🎯
   </button>
+
+  <!-- Modals -->
+  <div id="tapModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tapModalTitle">
+    <div class="modal-content">
+      <h2 id="tapModalTitle" class="text-xl font-bold mb-2">Single Tap</h2>
+      <p>This triggers a single frame detection.</p>
+      <button id="closeTapModal" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded mt-4">Close</button>
+    </div>
+  </div>
+
+  <div id="longPressModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="longPressModalTitle">
+    <div class="modal-content">
+      <h2 id="longPressModalTitle" class="text-xl font-bold mb-2">Stop Camera?</h2>
+      <p>Do you want to stop the camera stream?</p>
+      <div class="mt-4 space-x-4">
+        <button id="confirmStop" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-white">Stop</button>
+        <button id="cancelStop" class="bg-gray-500 hover:bg-gray-600 px-4 py-2 rounded text-white">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const video = document.getElementById('video');
     const overlay = document.getElementById('overlay');
     const ctx = overlay.getContext('2d');
     const fab = document.getElementById('fab');
+    const tapModal = document.getElementById('tapModal');
+    const longPressModal = document.getElementById('longPressModal');
+    const closeTapModalBtn = document.getElementById('closeTapModal');
+    const confirmStopBtn = document.getElementById('confirmStop');
+    const cancelStopBtn = document.getElementById('cancelStop');
 
     let model, detecting = false, cameraActive = false;
     let facingMode = 'environment';
     let lastTap = 0, tapCount = 0;
     let longPressTimer = null;
     let lastTime = 0;
+    let frameSkip = 0; // skip frames for performance (e.g. detect every 2 frames)
 
-    // 📷 Start camera
+    // Start camera with facing mode
     async function startCamera() {
       stopCamera();
       try {
@@ -58,15 +134,23 @@
         }).catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
         video.srcObject = stream;
         await new Promise(r => video.onloadedmetadata = r);
-        overlay.width = video.videoWidth;
-        overlay.height = video.videoHeight;
+        adjustCanvasSize();
         cameraActive = true;
       } catch (err) {
         alert('Camera error: ' + err.message);
       }
     }
 
-    // 🛑 Stop camera
+    function adjustCanvasSize() {
+      // Match canvas size and position with video
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+      overlay.style.top = video.offsetTop + 'px';
+      overlay.style.left = (video.offsetLeft + video.clientWidth / 2) + 'px';
+      overlay.style.transform = 'translateX(-50%)';
+    }
+
+    // Stop camera stream
     function stopCamera() {
       if (!cameraActive) return;
       const tracks = video.srcObject?.getTracks?.() || [];
@@ -76,14 +160,19 @@
       ctx.clearRect(0, 0, overlay.width, overlay.height);
     }
 
-    // 🔍 Single detection
+    // Single frame detection
     async function detectFrame() {
       if (!model || !cameraActive) return;
       const preds = await model.detect(video);
+      drawPredictions(preds);
+    }
+
+    // Draw bounding boxes and labels
+    function drawPredictions(predictions) {
       ctx.clearRect(0, 0, overlay.width, overlay.height);
-      preds.forEach(p => {
+      predictions.forEach(p => {
         if (p.score < 0.5) return;
-        const [x, y, w, h] = p.bbox.map(v => v|0); // bitwise truncate
+        const [x, y, w, h] = p.bbox.map(v => v|0);
         ctx.strokeStyle = '#0FAD4E';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, w, h);
@@ -93,10 +182,16 @@
       });
     }
 
-    // 🔄 Continuous detection
+    // Continuous detection loop
     async function detectLoop(time) {
       if (!detecting || !model || !cameraActive) return;
-      await detectFrame();
+      if (frameSkip === 0) {
+        const preds = await model.detect(video);
+        drawPredictions(preds);
+        frameSkip = 1; // skip next frame
+      } else {
+        frameSkip--;
+      }
       const fps = (1000 / (time - lastTime))|0;
       lastTime = time;
       ctx.fillStyle = '#fff';
@@ -105,40 +200,57 @@
       requestAnimationFrame(detectLoop);
     }
 
-    // 🔄 Switch camera
+    // Switch camera front/back
     async function switchCamera() {
       facingMode = (facingMode === 'environment') ? 'user' : 'environment';
       await startCamera();
       if (detecting) requestAnimationFrame(detectLoop);
     }
 
-    // 🎛 FAB gesture handling
+    // FAB gestures: tap, double tap, triple tap, long press
     fab.addEventListener('click', () => {
       const now = Date.now();
       tapCount++;
       setTimeout(() => tapCount = 0, 400);
 
       if (tapCount === 1 && now - lastTap > 300) {
-        detectFrame(); // Single tap
-      } 
+        // Show tap modal for single tap info
+        tapModal.classList.remove('hidden');
+      }
       if (tapCount === 2) {
-        detecting = !detecting; // Double tap
+        detecting = !detecting;
         if (detecting) requestAnimationFrame(detectLoop);
       }
       if (tapCount === 3) {
-        switchCamera(); // Triple tap
+        switchCamera();
         tapCount = 0;
       }
       lastTap = now;
     });
 
+    // Show modal for long press to confirm stop camera
     fab.addEventListener('mousedown', () => {
-      longPressTimer = setTimeout(() => stopCamera(), 800);
+      longPressTimer = setTimeout(() => {
+        longPressModal.classList.remove('hidden');
+      }, 800);
     });
     fab.addEventListener('mouseup', () => clearTimeout(longPressTimer));
     fab.addEventListener('mouseleave', () => clearTimeout(longPressTimer));
 
-    // 🚀 Init
+    // Modal buttons
+    closeTapModalBtn.onclick = () => tapModal.classList.add('hidden');
+    cancelStopBtn.onclick = () => longPressModal.classList.add('hidden');
+    confirmStopBtn.onclick = () => {
+      stopCamera();
+      longPressModal.classList.add('hidden');
+    };
+
+    // On resize adjust canvas
+    window.addEventListener('resize', () => {
+      if (cameraActive) adjustCanvasSize();
+    });
+
+    // Initialize app
     (async () => {
       await startCamera();
       model = await cocoSsd.load();
