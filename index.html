@@ -1,85 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Real‑Time Object Detection</title>
+  <meta charset="UTF-8"/>
+  <title>Real‑Time Object Detection (Front/Back Switch)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%; overflow: hidden;
+      background: black;
+    }
+    #video, #overlay {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    #fab {
+      position: absolute; bottom: 20px; right: 20px;
+    }
+  </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-  <div class="bg-white rounded shadow-lg p-6 w-full max-w-lg">
-    <h1 class="text-3xl font-bold mb-4 text-center">Object Detector</h1>
-    <div class="relative">
-      <video id="video" autoplay playsinline muted class="rounded w-full"></video>
-      <canvas id="overlay" class="absolute top-0 left-0 w-full h-full"></canvas>
-    </div>
-    <div class="mt-4 flex justify-between items-center">
-      <button id="toggle" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded">Start Detection</button>
-      <span id="fps" class="text-gray-600"></span>
-    </div>
-  </div>
+<body>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  
+  <!-- Floating Action Button -->
+  <button id="fab" class="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-4 shadow-lg">
+    🎯
+  </button>
 
   <script>
     const video = document.getElementById('video');
     const overlay = document.getElementById('overlay');
     const ctx = overlay.getContext('2d');
-    const btn = document.getElementById('toggle');
-    const fpsDisplay = document.getElementById('fps');
-    let model, detecting = false, lastTime = 0;
+    const fab = document.getElementById('fab');
 
-    async function setupCamera() {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { exact: 'environment' } },
-        audio: false
-      }).catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
-      video.srcObject = stream;
-      await new Promise(r => video.onloadedmetadata = r);
-      overlay.width = video.videoWidth;
-      overlay.height = video.videoHeight;
+    let model, detecting = false, cameraActive = false;
+    let facingMode = 'environment';
+    let lastTap = 0, tapCount = 0;
+    let longPressTimer = null;
+    let lastTime = 0;
+
+    // 📷 Start camera with given facingMode
+    async function startCamera() {
+      stopCamera();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode }, audio: false
+        }).catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+        cameraActive = true;
+      } catch (err) {
+        alert('Camera error: ' + err.message);
+      }
     }
 
-    async function loadModel() {
-      model = await cocoSsd.load();
-    }
-
-    async function detectFrame(time) {
-      if (!detecting) return;
-      const predictions = await model.detect(video);
+    // 🛑 Stop camera
+    function stopCamera() {
+      if (!cameraActive) return;
+      const tracks = video.srcObject?.getTracks?.() || [];
+      tracks.forEach(track => track.stop());
+      cameraActive = false;
+      detecting = false;
       ctx.clearRect(0, 0, overlay.width, overlay.height);
+    }
 
-      predictions.forEach(p => {
+    // 🔍 Single detection
+    async function detectFrame() {
+      if (!model || !cameraActive) return;
+      const preds = await model.detect(video);
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      preds.forEach(p => {
         if (p.score < 0.5) return;
-        const [x, y, w, h] = p.bbox;
+        const [x, y, w, h] = p.bbox.map(v => v|0); // bitwise truncate
         ctx.strokeStyle = '#0FAD4E';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, w, h);
         ctx.fillStyle = '#0FAD4E';
-        ctx.font = '18px sans-serif';
-        ctx.fillText(`${p.class} ${(p.score*100).toFixed(0)}%`, x, y > 20 ? y - 5 : y + 18);
+        ctx.font = '16px sans-serif';
+        ctx.fillText(`${p.class} ${(p.score*100)|0}%`, x, y > 20 ? y - 5 : y + 18);
       });
+    }
 
-      const fps = 1000 / (time - lastTime);
+    // 🔄 Continuous detection loop
+    async function detectLoop(time) {
+      if (!detecting || !model || !cameraActive) return;
+      await detectFrame();
+      const fps = (1000 / (time - lastTime))|0;
       lastTime = time;
-      fpsDisplay.textContent = `${fps.toFixed(1)} fps`;
-
-      requestAnimationFrame(detectFrame);
+      ctx.fillStyle = '#fff';
+      ctx.font = '14px monospace';
+      ctx.fillText(`${fps} fps`, 10, 20);
+      requestAnimationFrame(detectLoop);
     }
 
-    btn.onclick = () => {
-      detecting = !detecting;
-      btn.textContent = detecting ? 'Stop Detection' : 'Start Detection';
-      if (detecting) requestAnimationFrame(detectFrame);
+    // 🔄 Switch camera
+    async function switchCamera() {
+      facingMode = (facingMode === 'environment') ? 'user' : 'environment';
+      await startCamera();
+      if (detecting) requestAnimationFrame(detectLoop);
     }
 
-    async function init() {
-      await setupCamera();
-      await loadModel();
-      btn.disabled = false;
-    }
+    // 🎛 FAB gesture handling
+    fab.addEventListener('click', () => {
+      const now = Date.now();
+      tapCount++;
+      setTimeout(() => tapCount = 0, 400);
 
-    btn.disabled = true;
-    init();
+      if (tapCount === 1 && now - lastTap > 300) {
+        // Single tap = detect one frame
+        detectFrame();
+      } 
+      if (tapCount === 2) {
+        // Double tap = toggle detection
+        detecting = !detecting;
+        if (detecting) requestAnimationFrame(detectLoop);
+      }
+      if (tapCount === 3) {
+        // Triple tap = switch camera
+        switchCamera();
+        tapCount = 0;
+      }
+      lastTap = now;
+    });
+
+    fab.addEventListener('mousedown', () => {
+      longPressTimer = setTimeout(() => stopCamera(), 800);
+    });
+    fab.addEventListener('mouseup', () => clearTimeout(longPressTimer));
+    fab.addEventListener('mouseleave', () => clearTimeout(longPressTimer));
+
+    // 🚀 Init
+    (async () => {
+      await startCamera();
+      model = await cocoSsd.load();
+    })();
   </script>
 </body>
 </html>
