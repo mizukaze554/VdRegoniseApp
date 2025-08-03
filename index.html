@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Image Recognition with Camera</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-md mx-auto bg-white p-4 rounded shadow">
+    <h1 class="text-2xl font-bold mb-4">Live Object Recognition</h1>
+    <video id="video" autoplay playsinline class="w-full rounded border"></video>
+    <div class="mt-4 flex space-x-2">
+      <button id="snap" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 rounded">Snap & Analyse</button>
+      <button id="clear" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 rounded">Clear</button>
+    </div>
+    <div id="results" class="mt-4 space-y-2"></div>
+    <canvas id="canvas" class="hidden"></canvas>
+    <div class="mt-4 text-xs text-gray-500">
+      Powered by <a href="https://imagga.com" target="_blank" class="underline">Imagga</a>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const snapBtn = document.getElementById('snap');
+    const clearBtn = document.getElementById('clear');
+    const canvas = document.getElementById('canvas');
+    const results = document.getElementById('results');
+
+    // Replace these with your own API key and secret strings
+    const IMAGGA_API_KEY = 'YOUR_API_KEY';
+    const IMAGGA_API_SECRET = 'YOUR_API_SECRET';
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+      } catch (err) {
+        alert('Error accessing camera: ' + err.message);
+      }
+    }
+
+    async function analyseImage(dataURL) {
+      results.innerHTML = '<p class="text-gray-600">Analyzing…</p>';
+      // convert base64 to blob
+      const res = await fetch(dataURL);
+      const blob = await res.blob();
+      const form = new FormData();
+      form.append('image', blob, 'capture.jpg');
+
+      const auth = btoa(IMAGGA_API_KEY + ':' + IMAGGA_API_SECRET);
+      const resp = await fetch('https://api.imagga.com/v2/tags', {
+        method: 'POST',
+        headers: { 'Authorization': 'Basic ' + auth },
+        body: form
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        results.innerHTML = `<p class="text-red-500">Error: ${data.status?.text || resp.status}</p>`;
+        return;
+      }
+      const tags = data.result.tags.slice(0, 5);
+      results.innerHTML = '';
+      tags.forEach(tag => {
+        const p = document.createElement('p');
+        p.className = 'text-lg';
+        p.innerHTML = `${tag.tag.en} ‑ <span class="text-sm text-gray-500">${(tag.confidence).toFixed(1)}%</span>`;
+        results.appendChild(p);
+      });
+    }
+
+    snapBtn.addEventListener('click', () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL('image/jpeg');
+      analyseImage(dataUrl);
+    });
+
+    clearBtn.addEventListener('click', () => {
+      results.innerHTML = '';
+    });
+
+    // start video on load
+    startCamera();
+  </script>
+</body>
+</html>
