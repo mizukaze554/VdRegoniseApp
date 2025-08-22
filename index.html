@@ -2,153 +2,524 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Optimized Object Detection</title>
+  <title>Multi-FAB Real-Time Object Detection — Ghibli Edition</title>
+
+  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Fonts (soft, rounded vibe) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <!-- TensorFlow.js + WASM backend + COCO-SSD -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4/dist/tf-backend-wasm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#000; user-select:none; }
-    #container { position:relative; height:70vh; max-width:100vw; margin:2vh auto; background:#111; border-radius:12px; overflow:hidden; }
-    video, canvas { height:100%; width:auto; max-width:100vw; object-fit:cover; border-radius:12px; }
-    #fabContainer { position:fixed; bottom:5%; right:5%; display:flex; flex-direction:column; gap:12px; z-index:20; }
-    .fab { width:clamp(60px,15vw,90px); height:clamp(60px,15vw,90px); font-size:clamp(22px,6vw,36px); border-radius:50%; display:flex; justify-content:center; align-items:center; color:#fff; box-shadow:0 8px 15px rgba(0,0,0,0.25); cursor:pointer; transition:background-color 0.2s ease; }
-    .fab:hover { filter:brightness(1.1); }
-    #fabDetect { background:#2563eb; } #fabSingle { background:#16a34a; } #fabSwitch { background:#d97706; } #fabStop { background:#dc2626; }
-    .toast { position:fixed; bottom:10%; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:0.5rem 1rem; border-radius:8px; opacity:0; transition:opacity 0.3s ease; pointer-events:none; z-index:30; }
-    .toast.show { opacity:0.9; }
+    :root{
+      --gh-bg: #0f172a;         /* night sky */
+      --gh-card: #1e293b;      /* slate card */
+      --gh-accent: #84cc16;    /* meadow green */
+      --gh-accent-2: #60a5fa;  /* sky blue */
+      --gh-warm: #f59e0b;      /* warm amber */
+      --gh-danger: #ef4444;    /* red */
+    }
+    html, body {
+      height: 100%;
+      background:
+        radial-gradient(1200px 600px at 20% -10%, #1b2a52 0%, transparent 60%),
+        radial-gradient(1200px 600px at 80% -20%, #22335d 0%, transparent 60%),
+        linear-gradient(180deg, #0b1226 0%, #0e1530 35%, #0f172a 100%);
+      color: #e5e7eb;
+      margin: 0;
+      font-family: 'Quicksand', 'Nunito', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      user-select: none;
+    }
+    /* tw helper: hide scrollbars for the toolbar tags when overflow */
+    .no-scrollbar::-webkit-scrollbar{ display:none; }
+    .no-scrollbar{ -ms-overflow-style:none; scrollbar-width:none; }
+
+    /* Scene container */
+    #container {
+      position: relative;
+      height: min(68vh, 70vw);
+      max-width: 96vw;
+      margin: 3vh auto 1rem;
+      border-radius: 1.25rem;
+      background: linear-gradient(180deg,#0b1226 0%, #0e152f 100%);
+      box-shadow:
+        0 20px 40px rgba(0,0,0,.35),
+        inset 0 0 0 1px rgba(255,255,255,.04);
+      overflow: hidden;
+    }
+    #video, #overlay {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+
+    /* Floating panel (Ghibli-ish meadow card) */
+    .panel {
+      background: rgba(30,41,59,.8);
+      backdrop-filter: blur(8px);
+      border-radius: 1rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
+    }
+
+    /* FABs */
+    .fab {
+      width: clamp(54px, 6.8vw, 78px);
+      height: clamp(54px, 6.8vw, 78px);
+      border-radius: 9999px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 10px 20px rgba(0,0,0,.35);
+      transition: transform .08s ease, filter .15s ease;
+    }
+    .fab:active { transform: translateY(1px) scale(.98); }
+    .fab img { width: 60%; height: 60%; pointer-events: none; }
+
+    /* Toasts */
+    #toasts { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%); display: grid; gap: .5rem; z-index: 60; }
+    .toast { background: rgba(30,41,59,.95); border: 1px solid rgba(255,255,255,.06); padding: .5rem .75rem; border-radius: .75rem; font-weight: 600; }
+
+    /* Tag chips */
+    .chip { border: 1px solid rgba(255,255,255,.09); border-radius: 9999px; padding: .25rem .6rem; cursor: pointer; white-space: nowrap; }
+    .chip-active { background: rgba(132,204,22,.15); border-color: rgba(132,204,22,.45); color: #d9f99d; }
+
+    /* FPS badge */
+    .fps-badge { position:absolute; top:.6rem; left:.6rem; background: rgba(15,23,42,.75); border:1px solid rgba(255,255,255,.08); border-radius:.6rem; padding:.25rem .45rem; font: 600 12px/1.1 monospace; }
+
+    /* Gentle float animation for header icons */
+    @keyframes floaty { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-4px) } }
+    .floaty { animation: floaty 4s ease-in-out infinite; }
+
+    /* Accessibility helpers */
+    .sr-only{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   </style>
 </head>
 <body>
-  <div id="container">
+
+  <!-- Header -->
+  <header class="max-w-6xl mx-auto px-4 pt-4">
+    <div class="flex items-center gap-3">
+      <img class="w-8 h-8 floaty" alt="" src="https://api.iconify.design/mdi/leaf.svg" />
+      <h1 class="text-xl sm:text-2xl font-extrabold tracking-wide">
+        Multi-FAB Object Detection <span class="text-lime-300">Ghibli</span> Edition
+      </h1>
+    </div>
+    <p class="opacity-80 mt-1 text-sm">
+      Choose a preset, set a score threshold, and optionally filter classes. Cozy vibes, sharp boxes. 🌿
+    </p>
+  </header>
+
+  <!-- Video / Canvas -->
+  <section id="container" class="relative">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay"></canvas>
-  </div>
+    <div id="fps" class="fps-badge">— fps</div>
+  </section>
 
-  <div id="fabContainer">
-    <button id="fabDetect" class="fab" title="Toggle Continuous Detection">🔄</button>
-    <button id="fabSingle" class="fab" title="Single Frame Detect">🎯</button>
-    <button id="fabSwitch" class="fab" title="Switch Camera">🔄📷</button>
-    <button id="fabStop" class="fab" title="Stop Camera">⏹️</button>
-  </div>
+  <!-- Controls -->
+  <section class="max-w-6xl mx-auto px-4">
+    <div class="grid lg:grid-cols-12 gap-4">
+      <!-- Left: settings -->
+      <div class="panel p-4 lg:col-span-8">
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Presets -->
+          <div class="flex items-center gap-2">
+            <span class="text-sm opacity-80">Preset:</span>
+            <div class="flex rounded-full overflow-hidden border border-white/10">
+              <button id="presetFast" class="px-3 py-1.5 text-sm hover:bg-white/5">Fast</button>
+              <button id="presetBalanced" class="px-3 py-1.5 text-sm bg-white/5 border-x border-white/10">Balanced</button>
+              <button id="presetPrecise" class="px-3 py-1.5 text-sm hover:bg-white/5">Precise</button>
+            </div>
+          </div>
 
-  <div id="toast" class="toast"></div>
+          <!-- Model base -->
+          <div class="flex items-center gap-2">
+            <span class="text-sm opacity-80">Model:</span>
+            <select id="modelBase" class="bg-transparent border border-white/10 rounded-lg px-2 py-1.5 text-sm">
+              <option value="lite_mobilenet_v2">Lite (faster)</option>
+              <option value="mobilenet_v2">MobileNet (more accurate)</option>
+            </select>
+          </div>
+
+          <!-- Score -->
+          <div class="flex items-center gap-2">
+            <label for="score" class="text-sm opacity-80">Score ≥ <span id="scoreVal">0.50</span></label>
+            <input id="score" type="range" min="0.2" max="0.9" step="0.01" value="0.50" class="w-40 accent-lime-400">
+          </div>
+
+          <!-- Snapshot -->
+          <button id="btnSnap" class="ml-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5">
+            <img alt="" src="https://api.iconify.design/mdi/camera.svg" class="w-5 h-5">
+            <span class="text-sm">Snapshot</span>
+          </button>
+        </div>
+
+        <!-- Class filter row -->
+        <div class="mt-3">
+          <div class="flex items-center gap-2">
+            <span class="text-sm opacity-80">Class filter:</span>
+            <div id="classChips" class="flex gap-2 overflow-x-auto no-scrollbar">
+              <!-- chips injected -->
+            </div>
+            <button id="clearFilter" class="ml-auto text-xs opacity-80 hover:opacity-100 underline">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: FABs -->
+      <div class="panel p-4 lg:col-span-4">
+        <div class="grid grid-cols-4 sm:grid-cols-4 gap-3">
+          <button id="fabDetect" class="fab" style="background:#2563eb" title="Toggle Continuous Detection" aria-label="Toggle Continuous Detection">
+            <img alt="" src="https://api.iconify.design/mdi/sync.svg">
+          </button>
+          <button id="fabSingle" class="fab" style="background:#16a34a" title="Single Frame Detect" aria-label="Single Frame Detect">
+            <img alt="" src="https://api.iconify.design/mdi/target-variant.svg">
+          </button>
+          <button id="fabSwitch" class="fab" style="background:#d97706" title="Switch Front/Back Camera" aria-label="Switch Camera">
+            <img alt="" src="https://api.iconify.design/mdi/camera-switch.svg">
+          </button>
+          <button id="fabStop" class="fab" style="background:#dc2626" title="Stop Camera" aria-label="Stop Camera">
+            <img alt="" src="https://api.iconify.design/mdi/stop.svg">
+          </button>
+        </div>
+        <p id="status" class="text-xs opacity-80 mt-3">Loading…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Toasts -->
+  <div id="toasts" aria-live="polite"></div>
 
   <script>
+    // Elements
     const video = document.getElementById('video');
     const overlay = document.getElementById('overlay');
     const ctx = overlay.getContext('2d');
+    const fpsEl = document.getElementById('fps');
+    const statusEl = document.getElementById('status');
 
     const fabDetect = document.getElementById('fabDetect');
     const fabSingle = document.getElementById('fabSingle');
     const fabSwitch = document.getElementById('fabSwitch');
-    const fabStop = document.getElementById('fabStop');
-    const toast = document.getElementById('toast');
+    const fabStop   = document.getElementById('fabStop');
 
-    let model, detecting = false, cameraActive = false, facingMode = 'environment';
-    let lastTime = 0, dynamicSkip = 0, apiMode = false;
+    const modelBaseSel = document.getElementById('modelBase');
+    const scoreSlider = document.getElementById('score');
+    const scoreVal = document.getElementById('scoreVal');
+    const presetFast = document.getElementById('presetFast');
+    const presetBalanced = document.getElementById('presetBalanced');
+    const presetPrecise = document.getElementById('presetPrecise');
+    const btnSnap = document.getElementById('btnSnap');
 
-    const showToast = (msg) => {
-      toast.textContent = msg;
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 1000);
-    };
+    const classChips = document.getElementById('classChips');
+    const clearFilter = document.getElementById('clearFilter');
+    const toasts = document.getElementById('toasts');
 
-    async function startCamera() {
-      stopCamera();
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode }, audio:false })
-          .catch(() => navigator.mediaDevices.getUserMedia({ video:true }));
-        video.srcObject = stream;
-        await new Promise(r => video.onloadedmetadata = r);
-        resizeCanvas();
-        cameraActive = true;
-      } catch (err) {
-        showToast(`Camera error: ${err.message}`);
-      }
+    // State
+    let model = null;
+    let detecting = false;
+    let cameraActive = false;
+    let facingMode = 'environment';
+    let frameSkip = 2;             // tuned by preset
+    let skipCount = 0;
+    let minScore = 0.50;
+    let useRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+    let activeFilter = new Set();  // empty = no filter
+    let running = false;
+    let classesKnown = [];         // filled after first detect
+
+    // Hi-DPI scaling
+    function resizeCanvasToDisplaySize() {
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const rect = video.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+      overlay.style.width = width + 'px';
+      overlay.style.height = height + 'px';
+      overlay.width = Math.round(width * dpr);
+      overlay.height = Math.round(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    function resizeCanvas() {
-      overlay.width = video.videoWidth;
-      overlay.height = video.videoHeight;
+    function toast(msg, ms=1400){
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.textContent = msg;
+      toasts.appendChild(el);
+      setTimeout(()=>{ el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, ms);
+      setTimeout(()=>{ el.remove(); }, ms+350);
     }
 
-    function stopCamera() {
-      if (!cameraActive) return;
-      video.srcObject.getTracks().forEach(t => t.stop());
-      cameraActive = false;
-      detecting = false;
+    function setStatus(text){
+      statusEl.textContent = text;
+    }
+
+    // Draw predictions
+    function drawPredictions(predictions) {
       ctx.clearRect(0,0,overlay.width,overlay.height);
-      showToast('Camera stopped');
-    }
+      const rect = video.getBoundingClientRect();
+      const scaleX = overlay.width / rect.width;
+      const scaleY = overlay.height / rect.height;
 
-    function draw(preds, fps) {
-      ctx.clearRect(0,0,overlay.width,overlay.height);
-      preds.forEach(p => {
-        if (p.score < 0.5) return;
-        const [x, y, w, h] = p.bbox.map(v => v|0);
-        ctx.strokeStyle = '#0FAD4E'; ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, w, h);
-        ctx.fillStyle = '#0FAD4E';
-        ctx.font = `${Math.max(14, overlay.width * 0.02)|0}px sans-serif`;
-        ctx.fillText(`${p.class} ${(p.score*100)|0}%`, x, y > 20 ? y-5 : y+18);
+      ctx.lineWidth = 2;
+      ctx.font = '600 14px/1.2 Nunito, ui-sans-serif, system-ui';
+      predictions.forEach(p => {
+        if (p.score < minScore) return;
+        if (activeFilter.size && !activeFilter.has(p.class)) return;
+
+        const [x,y,w,h] = p.bbox; // in video CSS pixels (fits element)
+        // Scale to canvas space (already DPR-aware)
+        const bx = x * scaleX, by = y * scaleY, bw = w * scaleX, bh = h * scaleY;
+
+        // Box
+        ctx.strokeStyle = 'rgba(132,204,22,0.95)';
+        ctx.fillStyle   = 'rgba(132,204,22,0.15)';
+        ctx.beginPath();
+        ctx.rect(bx,by,bw,bh);
+        ctx.fill();
+        ctx.stroke();
+
+        // Label
+        const label = `${p.class} ${(p.score*100).toFixed(0)}%`;
+        const padX=6, padY=4;
+        const textW = ctx.measureText(label).width;
+        const lh = 18;
+        ctx.fillStyle = 'rgba(15,23,42,.92)';
+        ctx.strokeStyle = 'rgba(255,255,255,.08)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(bx, Math.max(0, by- (lh+8)), textW + padX*2, lh+8, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#d9f99d';
+        ctx.fillText(label, bx + padX, Math.max(12, by-8));
       });
-      if (fps !== undefined) {
-        ctx.fillStyle = '#fff';
-        ctx.font = `${Math.max(12, overlay.width * 0.015)|0}px monospace`;
-        ctx.fillText(`${fps} fps`, 10, 20);
+    }
+
+    // Snapshot
+    function takeSnapshot(){
+      const snapCanvas = document.createElement('canvas');
+      const rect = video.getBoundingClientRect();
+      snapCanvas.width = rect.width;
+      snapCanvas.height = rect.height;
+      const sctx = snapCanvas.getContext('2d');
+      sctx.drawImage(video, 0, 0, rect.width, rect.height);
+      // draw overlay at 1x CSS pixels (not DPR) for export
+      sctx.drawImage(overlay, 0, 0, rect.width, rect.height);
+      const url = snapCanvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'detection_snapshot.png';
+      a.click();
+      toast('Snapshot saved 📷');
+    }
+
+    // Camera
+    async function startCamera() {
+      stopCamera(true);
+      try {
+        const constraints = { video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(() => navigator.mediaDevices.getUserMedia({ video:true }));
+        video.srcObject = stream;
+        await video.play();
+
+        // Wait a tick for layout then size overlay
+        await new Promise(r => setTimeout(r, 30));
+        resizeCanvasToDisplaySize();
+        window.addEventListener('resize', resizeCanvasToDisplaySize);
+        cameraActive = true;
+        toast(`Camera: ${facingMode === 'environment' ? 'Back' : 'Front'}`);
+      } catch (e) {
+        setStatus('Camera error: ' + e.message);
+        toast('Camera error ❌');
       }
     }
 
-    async function detectOnce() {
-      if (!model || !cameraActive) return;
-      const preds = await model.detect(video);
-      draw(preds);
+    function stopCamera(silent=false) {
+      const tracks = video.srcObject?.getTracks?.() || [];
+      tracks.forEach(t => t.stop());
+      video.srcObject = null;
+      cameraActive = false;
+      running = false;
+      ctx.clearRect(0,0,overlay.width,overlay.height);
+      if(!silent) toast('Camera stopped ⏹️');
     }
 
-    async function detectLoop(time) {
-      if (!detecting || !model || !cameraActive) return;
-
-      const start = performance.now();
-      await detectOnce();
-      const duration = performance.now() - start;
-      const fps = (1000 / (time - lastTime))|0;
-      lastTime = time;
-
-      // dynamic throttle: aim for ~15–20fps
-      await new Promise(r => setTimeout(r, Math.max(0, 50 - duration)));
-
-      draw([], fps); // preserve fps readout
-      requestAnimationFrame(detectLoop);
-    }
-
-    async function switchCamera() {
-      facingMode = facingMode === 'environment' ? 'user' : 'environment';
+    async function switchCamera(){
+      facingMode = (facingMode === 'environment') ? 'user' : 'environment';
       await startCamera();
-      if (detecting) requestAnimationFrame(detectLoop);
-      showToast(`Switched to ${facingMode==='environment'?'Back':'Front'} camera`);
+      if (detecting) kickLoop();
     }
 
-    fabDetect.onclick = () => {
-      detecting = !detecting;
-      if (detecting) {
-        requestAnimationFrame(detectLoop);
-        showToast('Continuous detection ON');
-      } else showToast('Continuous detection OFF');
-    };
-    fabSingle.onclick = () => { detectOnce(); showToast('Single detect'); };
-    fabSwitch.onclick = switchCamera;
-    fabStop.onclick = () => { stopCamera(); showToast('Camera stopped'); };
+    // Detection loop
+    let lastTS = 0;
+    function step(ts){
+      if(!running || !cameraActive || !model) return;
+      const dt = ts - lastTS;
+      lastTS = ts;
 
-    window.addEventListener('resize', () => { if (cameraActive) resizeCanvas(); });
+      // FPS
+      const fps = dt > 0 ? (1000/dt) : 0;
+      fpsEl.textContent = `${fps.toFixed(0)} fps`;
 
+      if(skipCount === 0){
+        model.detect(video).then(preds => {
+          if (!classesKnown.length && preds?.length){
+            classesKnown = Array.from(new Set(preds.map(p=>p.class))).sort();
+            buildClassChips();
+          }
+          drawPredictions(preds);
+        });
+        skipCount = frameSkip;
+      } else {
+        skipCount--;
+      }
+
+      if(useRVFC){
+        video.requestVideoFrameCallback(step);
+      } else {
+        requestAnimationFrame(step);
+      }
+    }
+
+    function kickLoop(){
+      if(!model || !cameraActive) return;
+      running = true;
+      lastTS = performance.now();
+      skipCount = 0;
+      if(useRVFC){
+        video.requestVideoFrameCallback(step);
+      } else {
+        requestAnimationFrame(step);
+      }
+    }
+
+    // Build class chips
+    function buildClassChips(){
+      classChips.innerHTML = '';
+      const sample = classesKnown.length ? classesKnown : ['person','bicycle','car','cat','dog'];
+      sample.forEach(c =>{
+        const b = document.createElement('button');
+        b.className = 'chip text-xs opacity-90 hover:opacity-100';
+        b.textContent = c;
+        b.onclick = ()=>{
+          if(activeFilter.has(c)){ activeFilter.delete(c); b.classList.remove('chip-active'); }
+          else { activeFilter.add(c); b.classList.add('chip-active'); }
+        };
+        classChips.appendChild(b);
+      });
+    }
+
+    // Presets
+    function applyPreset(name){
+      switch(name){
+        case 'fast':
+          frameSkip = 3;
+          scoreSlider.value = 0.60;
+          modelBaseSel.value = 'lite_mobilenet_v2';
+          break;
+        case 'balanced':
+          frameSkip = 2;
+          scoreSlider.value = 0.50;
+          modelBaseSel.value = 'lite_mobilenet_v2';
+          break;
+        case 'precise':
+          frameSkip = 1;
+          scoreSlider.value = 0.40;
+          modelBaseSel.value = 'mobilenet_v2';
+          break;
+      }
+      minScore = parseFloat(scoreSlider.value);
+      scoreVal.textContent = minScore.toFixed(2);
+      toast(`Preset: ${name}`);
+    }
+
+    // Load / switch model
+    async function loadModel(){
+      setStatus('Loading model…');
+      const base = modelBaseSel.value;
+      model = await cocoSsd.load({ base });
+      setStatus(`Model ready (${base})`);
+      toast('Model loaded ✅');
+    }
+
+    // Init
     (async () => {
-      showToast('Loading model...');
-      model = await cocoSsd.load({ base: 'mobilenet_v2' }); // lightweight
-      await startCamera();
-      detecting = true;
-      requestAnimationFrame(detectLoop);
-      showToast('Model ready & detection started');
+      try {
+        setStatus('Initializing…');
+
+        // Try WASM, fall back to webgl/cpu
+        try {
+          tf.wasm.setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4/dist/');
+          await tf.setBackend('wasm');
+          await tf.ready();
+          setStatus('Using TFJS WASM backend');
+        } catch (e) {
+          console.warn('WASM backend failed, trying WebGL/CPU', e);
+          try {
+            await tf.setBackend('webgl'); await tf.ready();
+            setStatus('Using TFJS WebGL backend');
+          } catch(_){
+            await tf.setBackend('cpu'); await tf.ready();
+            setStatus('Using TFJS CPU backend');
+          }
+        }
+
+        // Default preset + model
+        applyPreset('balanced');
+        await loadModel();
+        await startCamera();
+
+        detecting = true;
+        kickLoop();
+        setStatus('Detection running');
+        toast('Detection started 🔄');
+
+        buildClassChips();
+      } catch (e) {
+        console.error(e);
+        setStatus('Init error: ' + e.message);
+      }
     })();
+
+    // Events
+    scoreSlider.oninput = (e)=>{ minScore = parseFloat(e.target.value); scoreVal.textContent = minScore.toFixed(2); };
+    btnSnap.onclick = takeSnapshot;
+
+    presetFast.onclick = ()=>applyPreset('fast');
+    presetBalanced.onclick = ()=>applyPreset('balanced');
+    presetPrecise.onclick = ()=>applyPreset('precise');
+
+    modelBaseSel.onchange = async ()=>{
+      const wasRunning = detecting;
+      detecting = false; running = false;
+      await loadModel();
+      detecting = wasRunning;
+      if (detecting) kickLoop();
+    };
+
+    clearFilter.onclick = ()=>{ activeFilter.clear(); document.querySelectorAll('#classChips .chip').forEach(c=>c.classList.remove('chip-active')); };
+
+    fabDetect.onclick = ()=>{
+      detecting = !detecting;
+      if(detecting){ toast('Continuous ON'); kickLoop(); }
+      else { running = false; toast('Continuous OFF'); setStatus('Paused'); }
+    };
+    fabSingle.onclick = async ()=>{
+      if(!model || !cameraActive) return;
+      const preds = await model.detect(video);
+      drawPredictions(preds);
+      toast('Single detect 🎯');
+    };
+    fabSwitch.onclick = ()=>switchCamera();
+    fabStop.onclick = ()=>stopCamera();
+
   </script>
 </body>
 </html>
